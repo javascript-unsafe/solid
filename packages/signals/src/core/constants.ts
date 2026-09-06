@@ -123,6 +123,18 @@ export const CONFIG_HELD_TRUTH = 1 << 17;
  * unobserved closure, NodeExtension) were the measured create-floor bytes
  * (warm dbmon profile: store node machinery ~36% + GC ~29%). */
 export const CONFIG_SLOT_NODE = 1 << 18;
+/** STAGED value UNSEEN by a tracked reader (#3291): a `createTrackedEffect`
+ * read this node while it carried a `_pendingValue` — tracked effects read
+ * with committed visibility (CONFIG_CHILDREN_FORBIDDEN, #3006), so the
+ * reader got the OLD `_value`. The write's notification already ran (to a
+ * subscriber list that may not have included this reader yet, or one that
+ * re-ran in the same pass, before the commit: tracked effects bypass the heap
+ * and share the user-effect queue), and commitPendingNode never re-notifies.
+ * Set at the read; consumed at that node's commit, which re-enqueues its
+ * tracked subscribers so they run once more with the committed value. A
+ * staged value that is discarded instead leaves the bit for the next commit
+ * to spend — one spurious tracked run, never a missed one. */
+export const CONFIG_STAGED_UNSEEN = 1 << 19;
 
 export const STATUS_NONE = 0;
 export const STATUS_PENDING = 1 << 0;

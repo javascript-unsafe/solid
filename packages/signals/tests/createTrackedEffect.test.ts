@@ -331,3 +331,96 @@ it("should work with dynamic conditional tracking", () => {
   expect(log).toHaveBeenCalledWith("Robert");
   expect(log).toHaveBeenCalledTimes(3);
 });
+
+describe("render-phase writes are observed (#3291)", () => {
+  // Tracked effects bypass the heap and run in the same pass's user queue,
+  // reading with committed visibility. A signal written during a render
+  // (ownedWrite: the writers below are render-effect effect phases.)
+  // effect's effect phase is staged, not committed, when that pass's tracked
+  // runs execute — the read must arm the node so the commit wakes them.
+
+  it("first run: a tracked effect subscribing after a render-phase write sees the committed value", () => {
+    const [s, setS] = createSignal(0, { ownedWrite: true });
+    const seen: number[] = [];
+    createRoot(() => {
+      createTrackedEffect(() => {
+        seen.push(s());
+      });
+      // schedule:true — the effect phase runs inside the flush's render phase,
+      // before the tracked effect's (queued) first run.
+      createRenderEffect(
+        () => 1,
+        () => {
+          setS(1);
+        },
+        { schedule: true } as any
+      );
+    });
+    flush();
+    expect(s()).toBe(1);
+    expect(seen).toEqual([0, 1]);
+  });
+
+  it("re-run: an already-subscribed tracked effect ends on the committed value", () => {
+    const [s, setS] = createSignal(0, { ownedWrite: true });
+    const [trig, setTrig] = createSignal(0);
+    const seen: number[] = [];
+    createRoot(() => {
+      createTrackedEffect(() => {
+        seen.push(s());
+      });
+      createRenderEffect(
+        () => trig(),
+        t => {
+          if (t) setS(t);
+        }
+      );
+    });
+    flush();
+    expect(seen).toEqual([0]);
+    setTrig(1);
+    flush();
+    expect(s()).toBe(1);
+    // The same-pass re-run reads the stale committed value (tracked effects
+    // never see staged values); the commit then wakes it once more.
+    expect(seen[seen.length - 1]).toBe(1);
+    expect(seen.filter(v => v === 1)).toHaveLength(1);
+  });
+
+  it("a memo staged during the render phase wakes its tracked reader at commit", () => {
+    const [src, setSrc] = createSignal(0, { ownedWrite: true });
+    const [trig, setTrig] = createSignal(0);
+    const m = createMemo(() => src() * 10);
+    const seen: number[] = [];
+    createRoot(() => {
+      createTrackedEffect(() => {
+        seen.push(m());
+      });
+      createRenderEffect(
+        () => trig(),
+        t => {
+          if (t) setSrc(t);
+        }
+      );
+    });
+    flush();
+    setTrig(1);
+    flush();
+    expect(m()).toBe(10);
+    expect(seen[seen.length - 1]).toBe(10);
+  });
+
+  it("no spurious run when the tracked effect already saw the committed value", () => {
+    const [s, setS] = createSignal(0, { ownedWrite: true });
+    const runs = vi.fn(() => {
+      s();
+    });
+    createRoot(() => createTrackedEffect(runs));
+    flush();
+    setS(1);
+    flush();
+    expect(runs).toHaveBeenCalledTimes(2);
+    flush();
+    expect(runs).toHaveBeenCalledTimes(2);
+  });
+});

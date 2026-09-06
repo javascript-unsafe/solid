@@ -1,9 +1,11 @@
 import {
   CONFIG_AUTO_DISPOSE,
   CONFIG_CHILDREN_FORBIDDEN,
+  CONFIG_STAGED_UNSEEN,
   EFFECT_RENDER,
   EFFECT_TRACKED,
   EFFECT_USER,
+  NOT_PENDING,
   REACTIVE_DISPOSED,
   STATUS_ERROR,
   STATUS_PENDING
@@ -214,6 +216,15 @@ export function trackedEffect(fn: () => void | (() => void), options?: NodeOptio
     try {
       node._modified = false;
       recompute(node);
+      // Tracked effects read with committed visibility (#3006), yet they are
+      // woken by WRITES, not commits — and this run may be that wake, landing
+      // in the same pass ahead of the commit (tracked runs share the user
+      // queue; heap readers re-run next pass), or a first run subscribing
+      // after the write's notification. Any dep still holding a staged value
+      // was therefore read stale: arm it so commitPendingNode re-enqueues
+      // this effect once the value lands (#3291).
+      for (let d = node._deps; d !== null; d = d._nextDep)
+        if (d._dep._pendingValue !== NOT_PENDING) d._dep._config |= CONFIG_STAGED_UNSEEN;
     } finally {
       if (__DEV__) setTrackedQueueCallback(false);
     }
