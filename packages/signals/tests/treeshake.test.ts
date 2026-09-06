@@ -143,11 +143,10 @@ describe("pay-for-use tree-shaking (#2883)", () => {
     // (entangleConfirmingTransitions/stealEntangledCargo, the store fold)
     // still shake out with until()/createOptimisticStore. Measured at
     // 21,536 post-change (with the #3181 bump above).
-    // CONSCIOUS BUMP (2026-09-05): +~42B for tracked-effect commit wakes
-    // (#3291, CONFIG_STAGED_UNSEEN) — the tracked run's dep walk arms deps
-    // still holding a staged value, and commitPendingNode's flag check
-    // re-enqueues tracked subscribers. Core-retained by necessity: the
-    // commit path is the floor. Measured at 21,578 post-change.
+    // Tracked-effect wakes ride the heap (#3291, 2026-09-06): -75 B. The
+    // tracked special case in enqueueSub is deleted; GlobalQueue._update
+    // gains a four-line branch that hands a tracked node's callback to the
+    // user queue instead of recomputing it. Measured at 21,461 post-change.
     expect(minifiedBytes).toBeLessThan(21_600);
   });
 

@@ -1,11 +1,9 @@
 import {
   CONFIG_AUTO_DISPOSE,
   CONFIG_CHILDREN_FORBIDDEN,
-  CONFIG_STAGED_UNSEEN,
   EFFECT_RENDER,
   EFFECT_TRACKED,
   EFFECT_USER,
-  NOT_PENDING,
   REACTIVE_DISPOSED,
   STATUS_ERROR,
   STATUS_PENDING
@@ -21,11 +19,13 @@ import {
 } from "./core.js";
 import { emitDiagnostic } from "./dev.js";
 import { StatusError, unwrapStatusError } from "./error.js";
+import { enqueueSub } from "./heap.js";
 import {
   _hitUnhandledAsync,
   GlobalQueue,
   haltReactivity,
   resetUnhandledAsync,
+  schedule,
   setTrackedQueueCallback,
   setEffectCallback
 } from "./scheduler.js";
@@ -216,15 +216,6 @@ export function trackedEffect(fn: () => void | (() => void), options?: NodeOptio
     try {
       node._modified = false;
       recompute(node);
-      // Tracked effects read with committed visibility (#3006), yet they are
-      // woken by WRITES, not commits — and this run may be that wake, landing
-      // in the same pass ahead of the commit (tracked runs share the user
-      // queue; heap readers re-run next pass), or a first run subscribing
-      // after the write's notification. Any dep still holding a staged value
-      // was therefore read stale: arm it so commitPendingNode re-enqueues
-      // this effect once the value lands (#3291).
-      for (let d = node._deps; d !== null; d = d._nextDep)
-        if (d._dep._pendingValue !== NOT_PENDING) d._dep._config |= CONFIG_STAGED_UNSEEN;
     } finally {
       if (__DEV__) setTrackedQueueCallback(false);
     }
@@ -254,7 +245,11 @@ export function trackedEffect(fn: () => void | (() => void), options?: NodeOptio
   // _type): its error arm is behavior-identical to the closure that used to
   // live here, without the per-node NodeExtension allocation.
   node._run = run;
-  node._queue.enqueue(EFFECT_USER, run);
+  // The first run rides the heap like every wake (GlobalQueue._update), so a
+  // tracked effect created inside a render-effect callback runs after that
+  // pass's staged writes commit, not before.
+  enqueueSub(node);
+  schedule();
 
   if (__DEV__ && !node._parent) {
     const message =

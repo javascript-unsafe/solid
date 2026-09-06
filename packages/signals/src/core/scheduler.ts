@@ -1,7 +1,6 @@
 import {
   CONFIG_AUTHORITATIVE_READ,
   CONFIG_HELD_TRUTH,
-  CONFIG_STAGED_UNSEEN,
   CONFIG_IN_SNAPSHOT_SCOPE,
   EFFECT_RENDER,
   EFFECT_TRACKED,
@@ -906,25 +905,17 @@ export function insertSubs(node: Signal<any> | Computed<any>, optimistic: boolea
 
 function commitPendingNode(n: Signal<any>): void {
   const c = n as Partial<Computed<unknown>>;
-  const staged = n._pendingValue !== NOT_PENDING;
-  if (staged) {
-    n._value = n._pendingValue as any;
-    n._pendingValue = NOT_PENDING;
-    // A tracked effect read this node while the value was staged (#3291,
-    // CONFIG_STAGED_UNSEEN): the commit is the first moment it can see it, so
-    // re-enqueue tracked subscribers for this pass's user phase. Other
-    // subscriber kinds were served by the write's notification.
-    if (n._config & CONFIG_STAGED_UNSEEN) {
-      n._config &= ~CONFIG_STAGED_UNSEEN;
-      for (let s = n._subs; s !== null; s = s._nextSub)
-        if ((s._sub as any)._type === EFFECT_TRACKED) enqueueSub(s._sub);
-    }
-  }
   if (!c._fn) {
+    if (n._pendingValue !== NOT_PENDING) {
+      n._value = n._pendingValue as any;
+      n._pendingValue = NOT_PENDING;
+    }
     if (n._config & CONFIG_HAS_COMPANIONS) GlobalQueue._snapCompanions!(n);
     return;
   }
-  if (staged) {
+  if (n._pendingValue !== NOT_PENDING) {
+    n._value = n._pendingValue as any;
+    n._pendingValue = NOT_PENDING;
     // Set _modified for effects, but not for tracked effects (they handle their own scheduling)
     if ((n as any)._type && (n as any)._type !== EFFECT_TRACKED) (n as any)._modified = true;
     // A quiet re-ask classification preserved through a held landing dies

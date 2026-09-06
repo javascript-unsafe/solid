@@ -1,4 +1,6 @@
 import {
+  action,
+  createEffect,
   createMemo,
   createRenderEffect,
   createRoot,
@@ -332,36 +334,14 @@ it("should work with dynamic conditional tracking", () => {
   expect(log).toHaveBeenCalledTimes(3);
 });
 
-describe("render-phase writes are observed (#3291)", () => {
-  // Tracked effects bypass the heap and run in the same pass's user queue,
-  // reading with committed visibility. A signal written during a render
+describe("wakes ride the heap (#3291)", () => {
+  // Tracked effects read with committed visibility, so a write staged during a
+  // pass (a render-effect callback) must not have its wake land in the SAME
+  // pass's user phase: the run would read the old value and nothing re-notifies
+  // at commit. Wakes go through the heap, which is processed after the commit.
   // (ownedWrite: the writers below are render-effect effect phases.)
-  // effect's effect phase is staged, not committed, when that pass's tracked
-  // runs execute — the read must arm the node so the commit wakes them.
 
-  it("first run: a tracked effect subscribing after a render-phase write sees the committed value", () => {
-    const [s, setS] = createSignal(0, { ownedWrite: true });
-    const seen: number[] = [];
-    createRoot(() => {
-      createTrackedEffect(() => {
-        seen.push(s());
-      });
-      // schedule:true — the effect phase runs inside the flush's render phase,
-      // before the tracked effect's (queued) first run.
-      createRenderEffect(
-        () => 1,
-        () => {
-          setS(1);
-        },
-        { schedule: true } as any
-      );
-    });
-    flush();
-    expect(s()).toBe(1);
-    expect(seen).toEqual([0, 1]);
-  });
-
-  it("re-run: an already-subscribed tracked effect ends on the committed value", () => {
+  it("an already-subscribed tracked effect re-runs once, after the commit", () => {
     const [s, setS] = createSignal(0, { ownedWrite: true });
     const [trig, setTrig] = createSignal(0);
     const seen: number[] = [];
@@ -381,13 +361,11 @@ describe("render-phase writes are observed (#3291)", () => {
     setTrig(1);
     flush();
     expect(s()).toBe(1);
-    // The same-pass re-run reads the stale committed value (tracked effects
-    // never see staged values); the commit then wakes it once more.
-    expect(seen[seen.length - 1]).toBe(1);
-    expect(seen.filter(v => v === 1)).toHaveLength(1);
+    // One run, with the landed value — never a stale same-pass run first.
+    expect(seen).toEqual([0, 1]);
   });
 
-  it("a memo staged during the render phase wakes its tracked reader at commit", () => {
+  it("a memo staged during a render-effect callback wakes its tracked reader after commit", () => {
     const [src, setSrc] = createSignal(0, { ownedWrite: true });
     const [trig, setTrig] = createSignal(0);
     const m = createMemo(() => src() * 10);
@@ -407,11 +385,32 @@ describe("render-phase writes are observed (#3291)", () => {
     setTrig(1);
     flush();
     expect(m()).toBe(10);
-    expect(seen[seen.length - 1]).toBe(10);
+    expect(seen).toEqual([0, 10]);
   });
 
-  it("no spurious run when the tracked effect already saw the committed value", () => {
+  it("a tracked effect created inside a render-effect callback runs after that pass's writes commit", () => {
+    // The Portal shape: the callback mounts children (creating the tracked
+    // effect) and writes a signal (a ref) in the same callback.
     const [s, setS] = createSignal(0, { ownedWrite: true });
+    const seen: number[] = [];
+    createRoot(() => {
+      createRenderEffect(
+        () => 1,
+        () => {
+          setS(1);
+          createTrackedEffect(() => {
+            seen.push(s());
+          });
+        },
+        { schedule: true } as any
+      );
+    });
+    flush();
+    expect(seen).toEqual([1]);
+  });
+
+  it("no extra run when the tracked effect already saw the committed value", () => {
+    const [s, setS] = createSignal(0);
     const runs = vi.fn(() => {
       s();
     });
@@ -422,5 +421,61 @@ describe("render-phase writes are observed (#3291)", () => {
     expect(runs).toHaveBeenCalledTimes(2);
     flush();
     expect(runs).toHaveBeenCalledTimes(2);
+  });
+
+  it("is still held by a transition and runs once after its commit", async () => {
+    const [s, setS] = createSignal(0);
+    const seen: string[] = [];
+    createRoot(() => {
+      createTrackedEffect(() => {
+        seen.push("T:" + s());
+      });
+      createEffect(
+        () => s(),
+        v => {
+          seen.push("E:" + v);
+        }
+      );
+    });
+    flush();
+    let resolveIt!: () => void;
+    const act = action(function* () {
+      setS(1);
+      yield new Promise<void>(r => (resolveIt = r));
+      setS(2);
+    });
+    const done = act();
+    flush();
+    // Order among user-phase callbacks is not a guarantee; the phase is.
+    expect(seen.slice().sort()).toEqual(["E:0", "T:0"]);
+    resolveIt();
+    await done;
+    flush();
+    expect(seen.slice(2).sort()).toEqual(["E:2", "T:2"]);
+  });
+
+  // Known limitation, unchanged by the heap route: a tracked effect subscribes
+  // in the effect phase, so a write landing EARLIER in the same pass to a
+  // signal it has not read yet is neither visible (committed-visibility read)
+  // nor subscribed. User effects do not have this gap because their compute
+  // subscribes at creation and reads staged values. Pinned so a change here
+  // is deliberate.
+  it("first run after a same-pass write to a not-yet-read signal does not see it (documented gap)", () => {
+    const [s, setS] = createSignal(0);
+    const seen: number[] = [];
+    createRoot(() => {
+      createEffect(
+        () => 1,
+        () => {
+          setS(1);
+        }
+      );
+      createTrackedEffect(() => {
+        seen.push(s());
+      });
+    });
+    flush();
+    expect(s()).toBe(1);
+    expect(seen).toEqual([0]);
   });
 });

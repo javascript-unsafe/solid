@@ -104,7 +104,21 @@ import type {
   Signal
 } from "./types.js";
 
-GlobalQueue._update = recompute;
+// The heap's per-node step. A tracked effect's heap visit is its compute
+// phase — empty, like a user effect whose compute reads nothing — and hands
+// the callback to the user queue. Routing the wake through the heap, rather
+// than straight into the queue at notify time, is what orders the run after
+// the commit regardless of which phase the write came from: a write in a
+// render-effect callback stages its value for the next pass, but a wake pushed
+// directly into the user queue ran in the SAME pass, read the old value, and
+// nothing re-notified it when the value landed (#3291).
+GlobalQueue._update = el => {
+  if ((el as any)._type === EFFECT_TRACKED) {
+    deleteFromHeap(el, queueFor(el));
+    (el as any)._modified = true;
+    el._queue.enqueue(EFFECT_USER, (el as any)._run);
+  } else recompute(el);
+};
 GlobalQueue._dispose = disposeChildren;
 
 export const PRIMITIVE_IN_FORBIDDEN_SCOPE_MESSAGE =
