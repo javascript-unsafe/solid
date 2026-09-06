@@ -1709,6 +1709,11 @@ export function createRenderEffect<T>(
   serverEffect(compute, effectFn, options);
 }
 
+/**
+ * @deprecated Do not use in new code: `createEffect(compute, effect)` for
+ * reactive side effects, `onSettled` for one-time post-render DOM work.
+ * Retained only to ease 1.x migration — see the JSDoc in `@solidjs/signals`.
+ */
 export function createTrackedEffect(
   compute: () => void | (() => void),
   options?: { name?: string }
