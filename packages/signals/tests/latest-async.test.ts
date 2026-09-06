@@ -19,6 +19,7 @@
  */
 import {
   createMemo,
+  createLoadingBoundary,
   createRenderEffect,
   createRoot,
   createSignal,
@@ -51,6 +52,7 @@ it("latest(asyncMemo) settles to the resolved value and re-reports pending on ea
       await current.promise;
       return `AV${c}`;
     });
+
     createRenderEffect(
       () => latest(asyncValue),
       v => {
@@ -98,4 +100,50 @@ it("latest(asyncMemo) settles to the resolved value and re-reports pending on ea
   await settle();
   expect(latestLog.at(-1)).toBe("AV2");
   expect(pendingLog.at(-1)).toBe(false);
+});
+
+it("latest render readers update while unrelated Loading work is pending (#3289)", async () => {
+  const [reload, setReload] = createSignal(0);
+  const gates = [deferred<void>(), deferred<void>(), deferred<void>()];
+  const tabValues: number[] = [];
+
+  createRoot(() => {
+    const graphs = gates.map((gate, index) =>
+      createMemo(async () => {
+        latest(reload);
+        await gate.promise;
+        return index;
+      })
+    );
+
+    const boundary = createLoadingBoundary(
+      () => graphs.map(graph => [isPending(() => graph()), graph()]),
+      () => "loading"
+    );
+
+    createRenderEffect(
+      () => boundary(),
+      () => {}
+    );
+
+    createRenderEffect(
+      () => latest(reload),
+      value => {
+        tabValues.push(value);
+      }
+    );
+  });
+
+  flush();
+  expect(tabValues).toEqual([0]);
+
+  for (let value = 1; value <= 3; value++) {
+    setReload(value);
+    flush();
+    expect(tabValues.at(-1)).toBe(value);
+  }
+
+  gates.forEach(gate => gate.resolve());
+  await settle();
+  expect(tabValues.at(-1)).toBe(3);
 });

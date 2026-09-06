@@ -63,7 +63,6 @@ export function getOrCreateLane(signal: Signal<any>): OptimisticLane {
   // the owner's write merges the companion's subscribers into this lane and
   // their effects wait on its async instead of flushing immediately.
   adoptCompanionLane(signal._x?._pendingSignal, lane);
-  adoptCompanionLane(signal._x?._latestValueComputed, lane);
   return lane;
 }
 
