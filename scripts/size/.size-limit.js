@@ -591,7 +591,14 @@ module.exports = [
     // Patch-channel removal (2026-09-02): 13.11 -> 12.97 KB, measured at
     // 12.93. The channel is deleted from next — regions own value delivery,
     // the unified-For design owns structure — reclaiming the insert $ll seam and core emission bytes.
-    limit: "12.97 KB",
+    //
+    // Responsive image preloads, as merged (#3183, 2026-09-05): 12.97 ->
+    // 13.01 KB, CI measured 13.00 (over by 30 B). The 09-01 note above
+    // predates the review round that added srcset URL-forgery rejection,
+    // the canonicalization split and hasWidthDescriptor to client.ts —
+    // those bytes land here, and this scenario was not ratcheted with the
+    // hydrating ones. Ratchet on next so the branch is green again.
+    limit: "13.01 KB",
     modifyEsbuildConfig
   },
   {
