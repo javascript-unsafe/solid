@@ -789,32 +789,6 @@ export function scope(fn) {
 
 const SCOPE_OPTIONS = { scope: true };
 
-// The element an insert() is currently evaluating content for. Dynamic
-// intrinsic elements are created lazily inside the memo that insert() pulls
-// during its compute, so this is live exactly when createElement (index.ts)
-// needs a namespace hint for tags that exist in both HTML and SVG/MathML
-// (`a`, `script`, `style`, `title`) — the parser resolves those from the
-// surrounding markup for static templates, and this is the runtime
-// equivalent (#3187). Best-effort: content evaluated outside an insert
-// (e.g. an eager `children()` helper) falls back to the HTML namespace.
-let insertionParent =
-  null; /** Namespace hint for dynamically created intrinsic elements. @internal */
-export function getInsertionParent(): Node | undefined;
-
-export function getInsertionParent() {
-  return insertionParent;
-}
-
-function withInsertionParent(parent, fn) {
-  const prev = insertionParent;
-  insertionParent = parent;
-  try {
-    return fn();
-  } finally {
-    insertionParent = prev;
-  }
-}
-
 // Hydration-time behaviors reached from the hot insert/event paths, installed
 // by hydrate() so client-only bundles shake the implementations. Call sites
 // guard on the null slot; only hydrate() can assign it (#2883). Rollup folds
@@ -930,7 +904,7 @@ export function insert(parent, accessor, marker, initial, options) {
   if (multi && !initial) initial = [];
   if (hydrationRt !== null) initial = hydrationRt.claimInitial(parent, multi, initial);
   if (typeof accessor !== "function") {
-    accessor = withInsertionParent(parent, () => normalize(accessor, initial, multi, true));
+    accessor = normalize(accessor, initial, multi, true);
     if (typeof accessor !== "function") {
       insertExpression(parent, accessor, initial, marker);
       host && tagHost(accessor, host);
@@ -946,12 +920,12 @@ export function insert(parent, accessor, marker, initial, options) {
   effect(
     prev => {
       if (hydrationRt !== null) current = hydrationRt.reclaimRegion(current, parent, marker);
-      const value = withInsertionParent(parent, () => normalize(accessor(), current, multi, true));
+      const value = normalize(accessor(), current, multi, true);
       if (typeof value !== "function") return value;
       effect(
         () => (
           hydrationRt !== null && (current = hydrationRt.reclaimRegion(current, parent, marker)),
-          withInsertionParent(parent, () => normalize(value, current, multi))
+          normalize(value, current, multi)
         ),
         inner => {
           current = insertExpression(parent, inner, current, marker);
