@@ -409,7 +409,9 @@ module.exports = [
     // drift, 31 B. Ratcheted to the next 0.01 kB per this file's rule.
     // Tracked-effect commit wake (#3291, 2026-09-05): 10.74 -> 10.77 KB,
     // measured at 10.748 macOS (+18 B; see the signals core-floor note).
-    limit: "10.77 KB",
+    // Linux CI lands at 10771 B, 1 B over the 10.77 KB cap — the usual
+    // cross-platform delta (cf. the store-family cap, 2026-09-04).
+    limit: "10.78 KB",
     modifyEsbuildConfig
   },
   {
